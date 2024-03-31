@@ -81,10 +81,6 @@ check_valid_date(date)
 
 n = int(input())
 
-floor = 1
-level = 1
-comnata = 1
-
 def generate_tower(n):
     current_room = 1
     floor = 1
