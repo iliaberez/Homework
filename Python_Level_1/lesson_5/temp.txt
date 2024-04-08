@@ -1,0 +1,2 @@
+main_dir:C:\Homework\Python_Level_1\lesson_5
+cur_dir:C:\Homework\Python_Level_1\lesson_5
