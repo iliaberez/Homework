@@ -71,7 +71,6 @@ class Card():
         self.line2 = self.generate_line()
         self.line3 = self.generate_line()
         all_line = self.line1 + self.line2 + self.line3
-        all_line.sort()
         self.item_all_line = list(filter(lambda x: x != 0, all_line))
 
     def generate_line(self):
