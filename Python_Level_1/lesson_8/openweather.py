@@ -133,31 +133,82 @@ class ApiPost:
     post_get_weather = 'https://api.openweathermap.org/data/2.5/weather'
     post_get_weather_for_group = 'http://api.openweathermap.org/data/2.5/group'
 
-    def get_weather_city_by_id(self, id):
-        if isinstance(id, str):
-            response = requests.get(f'{self.post_get_weather}?id={id}&appid={api_key}')
-            return response
-        
-        if isinstance(id, list):
-            str_id = ''
-            for i in id:
-                str_id += i + ','
-            response = requests.get(f'{self.post_get_weather_for_group}?id={str_id}&units=metric&appid={api_key}')
-            return response
-        
-    def get_data_city(self, name=None, country=None):
+    def _get_weather_city_by_id(self, id):
+        response = requests.get(f'{self.post_get_weather}?id={id}&units=metric&appid={api_key}')
+        response = json.loads(response.text)
+        return CityWeather.data_from_json(response)
+    
+    def _get_weather_for_group(self, list_id):
+        response = requests.get(f'{self.post_get_weather_for_group}?id={list_id}&units=metric&appid={api_key}')
+        response = json.loads(response.text)
+        for item in response['list']:
+            name = item['name']
+            db.insert_city(CityWeather.data_from_json(item))
+            
+    def get_data_city_by_name(self, name=None):
         with open('city.list.json', 'r', encoding='utf-8') as file:
             data = json.load(file)
+            result = False
             for item in data:
                 if name == item['name']:
-                    id = item['id']
-                    response = self.get_weather_city_by_id(str(id))
-                    print(response)
-                if country == item['country']:
-                    id = item['id']
-                    name = item['name']
-                    country = item['country']
+                    response = api._get_weather_city_by_id(item['id'])
+                    db.insert_city(response)
+                    result = True
+                    break
+            if not result:
+                print(f'Город {name} не найден\n')
+        file.close()
 
+    def get_country(self):
+        with open('city.list.json', 'r', encoding='utf-8') as file:
+            data = json.load(file)
+            list_country_name = []
+            for item in data:
+                list_country_name.append(item['country'])
+            list_country_name = set(list_country_name)
+            temp_str = ''
+            for item in list_country_name:
+                temp_str += item + ', '
+            print(temp_str)
+        file.close()
+
+    def get_country_city_list(self, country):
+        with open('city.list.json', 'r', encoding='utf-8') as file:
+            data = json.load(file)
+            list_city = []
+            for item in data:
+                if  country == item['country']:
+                    list_city.append(item['name'])
+            if len(list_city) > 0:
+                temp_str = ''
+                for item in list_city:
+                    temp_str += item + ', '
+                print(temp_str)
+            else:
+                print(f'Страна {country} не найдена\n')
+        file.close()
+    
+    def get_country_citys_and_write_db(self, country):
+        with open('city.list.json', 'r', encoding='utf-8') as file:
+            data = json.load(file)
+            str_id = ''
+            count_city = 0
+            list_id = []
+            for item in data:
+                if  country == item['country']:
+                    str_id += str(item['id']) + ','
+                    list_id.append(item['id'])      
+                    count_city += 1
+                    if len(list_id) == 19:
+                        api._get_weather_for_group(str_id)
+                        list_id = []
+                        str_id = ''
+            if count_city > 0:
+                print(f'В базу данных внесено {count_city}\n')
+            else:
+                print('Введённая страна не найдена\n')
+        file.close()
+            
 class CityWeather:
     def __init__(self, id, name, temperature, country):
         self.id = id
@@ -166,11 +217,13 @@ class CityWeather:
         self.temperature = temperature
         self.country = country
 
-def data_from_json(json):
-    id = json['id']
-    name = json['name']
-    country = json['country']
-    return CityWeather(id, name, None, country)
+    def data_from_json(json):
+        return CityWeather(
+            id = json['id'], 
+            name = json['name'], 
+            temperature = json['main']['temp'], 
+            country = json['sys']['country'],
+        )
 
 class Database:
     connection = sqlite3.connect('my_database.db')
@@ -181,12 +234,19 @@ class Database:
         self.connection.commit()
 
     def insert_city(self, city: CityWeather):
-        self.cursor.execute('INSERT INTO CITY (id, name, date, temperature, country) VALUES (?, ?, ?, ?, ?, ?)', 
+        self.cursor.execute('SELECT id FROM CITY where id = ?', (city.id,))
+        if self.cursor.fetchone() is None:
+            self.cursor.execute('INSERT INTO CITY (id, name, date, temperature, country) VALUES (?, ?, ?, ?, ?)', 
                             (city.id, city.name, str(city.date), city.temperature, city.country))
+            print(f'Город {city.name} успешно добавлен в базу данных\n')
+        else:
+            self.update_data(city.id, city.temperature)
+            print(f'Город {city.name} успешно обновлен в базу данных\n')
         self.connection.commit()
 
     def update_data(self, id, temperature):
-        self.cursor.execute('UPDATE CITY SET temperature = ? date = ? WHERE id = ?', (temperature, str(datetime.now(), id)))
+        date = str(datetime.now())
+        self.cursor.execute('UPDATE CITY SET temperature = ?, date = ? WHERE id = ?', (temperature, date, id))
 
     def get_data(self, name=None, country=None, id=None):
         if name:
@@ -202,7 +262,27 @@ class Database:
 
 api = ApiPost()
 db = Database()
-data_input = input('Введите страну или название города на английсокм, например Kemerovo:\n')
-api.get_data_city(data_input)
 db.create_database()
+while True:
+    input_str = input('1 - если хотите добавить город в базу данных, например Kemerovo\n' + 
+                      '2 - если хотите получить список стран\n'+ 
+                     '3 - если хотите получить список городов данной страны\n'+
+                     '4 - если хотите добаавить все города страны в базу данных\n'+
+                     '0 - для выхода\n'
+                     )
+    match input_str:
+        case '1':
+            temp_str = input('Введите название города ')
+            api.get_data_city_by_name(temp_str)
+        case '2':
+            print('Список стран:\n')
+            api.get_country()
+        case '3':
+            temp_str = input('Введите название страны ')
+            api.get_country_city_list(temp_str)
+        case '4':
+            temp_str = input('Введите название страны ')
+            api.get_country_citys_and_write_db(temp_str)
+        case '0':
+            break
 db.close_db()
